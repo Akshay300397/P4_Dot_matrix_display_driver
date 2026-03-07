@@ -6,6 +6,9 @@
   "idf.portWin": "detect",
   "idf.currentSetup": "C:\\Users\\Buildmet\\esp\\v5.3.2\\esp-idf",
   "idf.customExtraVars": {
+    "OPENOCD_SCRIPTS": "c:\\Espressif\\tools\\tools\\openocd-esp32\\v0.12.0-esp32-20230419/openocd-esp32/share/openocd/scripts",
+    "IDF_CCACHE_ENABLE": "1",
+    "ESP_ROM_ELF_DIR": "c:\\Espressif\\tools\\tools\\esp-rom-elfs\\20230320/",
     "IDF_TARGET": "esp32s3"
   }
 }
