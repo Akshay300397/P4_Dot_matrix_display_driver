@@ -13,7 +13,7 @@
  *
  * On boot:
  *   1. Draws a startup pattern to confirm display is working
- *   2. Starts UART listener — ready to receive commands
+ *   
  */
 
 #include "freertos/FreeRTOS.h"
@@ -35,27 +35,23 @@ static const char *TAG = "MAIN";
 
 static void draw_startup_pattern(void)
 {
-    ESP_LOGI(TAG, "Drawing startup pattern...");
+    ESP_LOGI(TAG, "Running hardware check patterns...");
 
     // ── Test 1: Color bars ─────────────────────────────────────
-    // Left panel  = RED fill
-    // Right panel = BLUE fill
     framebuffer_clear_back();
     framebuffer_fill_rect(0,   0, 64, 32, COLOR_RED);
     framebuffer_fill_rect(64,  0, 64, 32, COLOR_BLUE);
     framebuffer_swap();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // ── Test 2: Split horizontal bands ────────────────────────
-    // Top half    = GREEN
-    // Bottom half = YELLOW
+    // ── Test 2: Horizontal bands ───────────────────────────────
     framebuffer_clear_back();
     framebuffer_fill_rect(0, 0,  128, 16, COLOR_GREEN);
     framebuffer_fill_rect(0, 16, 128, 16, COLOR_YELLOW);
     framebuffer_swap();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // ── Test 3: All 7 colors + black ──────────────────────────
+    // ── Test 3: All 7 colors ───────────────────────────────────
     framebuffer_clear_back();
     framebuffer_fill_rect(0,   0, 16, 32, COLOR_RED);
     framebuffer_fill_rect(16,  0, 16, 32, COLOR_GREEN);
@@ -68,35 +64,40 @@ static void draw_startup_pattern(void)
     framebuffer_swap();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // ── Test 4: Corner pixels ─────────────────────────────────
+    // ── Test 4: Corner pixels ──────────────────────────────────
     framebuffer_clear_back();
-    framebuffer_set_pixel(0,   0,  COLOR_RED);     // top-left
-    framebuffer_set_pixel(127, 0,  COLOR_GREEN);   // top-right
-    framebuffer_set_pixel(0,   31, COLOR_BLUE);    // bottom-left
-    framebuffer_set_pixel(127, 31, COLOR_WHITE);   // bottom-right
-    framebuffer_set_pixel(63,  15, COLOR_YELLOW);  // center panel 1
-    framebuffer_set_pixel(64,  15, COLOR_CYAN);    // center panel 2
+    framebuffer_set_pixel(0,   0,  COLOR_RED);
+    framebuffer_set_pixel(127, 0,  COLOR_GREEN);
+    framebuffer_set_pixel(0,   31, COLOR_BLUE);
+    framebuffer_set_pixel(127, 31, COLOR_WHITE);
+    framebuffer_set_pixel(63,  15, COLOR_YELLOW);
+    framebuffer_set_pixel(64,  15, COLOR_CYAN);
     framebuffer_swap();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    // ── Test 5: Text on both panels ───────────────────────────
-    framebuffer_clear_back();
-    framebuffer_draw_string(1,  1,  "PANEL1", COLOR_RED);
-    framebuffer_draw_string(65, 1,  "PANEL2", COLOR_GREEN);
-    framebuffer_draw_string(1,  12, "128x32", COLOR_CYAN);
-    framebuffer_draw_string(1,  23, "ESP32S3", COLOR_YELLOW);
-    framebuffer_swap();
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI(TAG, "Hardware check complete");
+}
 
-    // ── Ready state: show "READY" + border ────────────────────
+// ─────────────────────────────────────────────────────────────
+//  FUNCTION 2: Default static content
+//  Displayed after hardware check — stays on screen
+//  until UART sends a new command to update it
+//  *** EDIT THIS FUNCTION to show your desired default content ***
+// ─────────────────────────────────────────────────────────────
+static void draw_default_content(void)
+{
     framebuffer_clear_back();
-    framebuffer_draw_rect(0, 0, 128, 32, COLOR_WHITE);   // border
-    framebuffer_draw_string(2, 2,  "HUB75 READY", COLOR_GREEN);
-    framebuffer_draw_string(2, 12, "UART LISTEN", COLOR_CYAN);
-    framebuffer_draw_string(2, 22, "115200 BAUD", COLOR_YELLOW);
-    framebuffer_swap();
 
-    ESP_LOGI(TAG, "Startup pattern complete — display ready");
+    // ── Put your default static content here ──────────────────
+    // Example: white border + ready message
+    framebuffer_draw_rect(0, 0, 128, 32, COLOR_WHITE);
+    framebuffer_draw_string(2,  2,  "SYSTEM READY", COLOR_GREEN);
+    framebuffer_draw_string(2,  12, "WAITING...",   COLOR_CYAN);
+    framebuffer_draw_string(2,  22, "115200 BAUD",  COLOR_YELLOW);
+    // ──────────────────────────────────────────────────────────
+
+    framebuffer_swap();
+    ESP_LOGI(TAG, "Default content displayed");
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -143,7 +144,10 @@ void app_main(void)
     // If display looks correct here, proceed — if not, check wiring
     draw_startup_pattern();
 
-    // ── Step 6: Start UART receiver task on Core 0 ────────────
+    // Step 6: Draw default static content  ← stays on screen
+    draw_default_content();
+
+    // ── Step 7: Start UART receiver task on Core 0 ────────────
     // Listens for commands from ethernet board
     // Updates back_buf and triggers framebuffer_swap()
     xTaskCreatePinnedToCore(

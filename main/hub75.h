@@ -16,10 +16,10 @@
 //  Match these to your physical panel spec
 // ─────────────────────────────────────────────────────────────
 
-#define PANEL_W         128     // Total width  = 2 panels × 64px
+#define PANEL_W         64     // Total width  = 2 panels × 64px
 #define PANEL_H          32     // Total height = 32px
 #define SCAN_ROWS        16     // 1:16 scan → 16 row address lines (ABCD)
-#define PANELS_COUNT      2     // Number of chained panels
+#define PANELS_COUNT      1     // Number of chained panels
 
 // ─────────────────────────────────────────────────────────────
 //  ESP32-S3 PIN ASSIGNMENTS
@@ -38,8 +38,8 @@
 // Row address pins (binary encoded)
 #define HUB75_PIN_A          1      // Row address bit 0 (LSB)
 #define HUB75_PIN_B          2      // Row address bit 1
-#define HUB75_PIN_C          4      // Row address bit 2
-#define HUB75_PIN_D          5      // Row address bit 3 (MSB)
+#define HUB75_PIN_C          3      // Row address bit 2
+#define HUB75_PIN_D          4      // Row address bit 3 (MSB)
 
 // ─────────────────────────────────────────────────────────────
 //  TIMING CONFIGURATION
