@@ -17,4 +17,5 @@ idf_component_register(
         esp_rom
         log
         spi_flash
+        esp_driver_ledc
 )

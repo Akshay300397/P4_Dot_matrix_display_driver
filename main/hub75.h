@@ -48,7 +48,7 @@
 
 #define HUB75_SPI_SPEED_HZ  20000000    // 20 MHz — safe for ICN6124 (max ~25MHz)
 #define HUB75_MUX_DELAY_US       1      // Row address settling delay (confirmed needed)
-#define HUB75_ROW_ON_US          1      // Row display time per refresh cycle
+#define HUB75_ROW_ON_US          200      // Row display time per refresh cycle  1-3000hz(dim),50-550hz,100-310hz,200-160hz(very bright)
 
 // ─────────────────────────────────────────────────────────────
 //  PUBLIC API

@@ -157,10 +157,10 @@ void app_main(void)
      * DIRECT CALL — blocks ~6 seconds while patterns cycle.
      * Defined in display_content.c, declared in display_content.h
      */
-    //row_scan_test();
+    row_scan_test();
     //ESP_LOGI(TAG, "Hardware check done");
 
-    run_hardware_check();
+    //run_hardware_check();
     ESP_LOGI(TAG, "Hardware check patterns complete");
     /* ── F: Static default content ──────────────────────────────
      * DIRECT CALL — draws and swaps, returns immediately.

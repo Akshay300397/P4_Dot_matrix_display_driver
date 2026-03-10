@@ -338,14 +338,17 @@ void draw_default_content(void)
 
     framebuffer_clear_back();
 
-    // White border — 1px outline around full panel
-    framebuffer_draw_rect(0, 0, PANEL_W, PANEL_H, COLOR_WHITE);
-
-    // 3 rows of text inside the border
-    // Max 10 chars per row — strings below are within limit
-    framebuffer_draw_string(2, 2,  "HUB75 OK",  COLOR_RED);    // 8 chars
-    framebuffer_draw_string(2, 12, "STEP 1",    COLOR_RED);     // 6 chars
-    framebuffer_draw_string(2, 22, "P4 64x32",  COLOR_RED);   // 8 chars
+    // No border — border's top/bottom rows merged visually with text
+    // and caused ghost confusion at row 0.
+    //
+    // 5×7 font layout on 32px tall panel:
+    //   y= 1 : row 1  pixels 1–7   (font height = 7px)
+    //   y=12 : row 2  pixels 12–18 (gap rows 8–11 = 4px breathing room)
+    //   y=23 : row 3  pixels 23–29 (gap rows 19–22 = 4px breathing room)
+    //                               rows 30–31 = 2px bottom margin
+    framebuffer_draw_string(1,  1, "HUB75 OK", COLOR_RED);
+    framebuffer_draw_string(1, 12, "STEP  1",  COLOR_GREEN);
+    framebuffer_draw_string(1, 23, "P4 64x32", COLOR_CYAN);
 
     framebuffer_swap();
 
