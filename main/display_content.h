@@ -51,3 +51,4 @@ void draw_default_content(void);
 
 void chain_order_test(void);
 void row_scan_test(void);
+void two_panel_rgb_test(void);

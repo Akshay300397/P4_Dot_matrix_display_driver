@@ -294,6 +294,76 @@ void chain_order_test(void)
     ESP_LOGI(TAG, "Report: which color lit up on which rows for each step.");
 }
 
+// ══════════════════════════════════════════════════════════════
+// DIAGNOSTIC: TWO PANEL RGB SEQUENCE TEST
+//
+// Lights each panel half (P1 top, P1 bottom, P2 top, P2 bottom)
+// with RED, GREEN, BLUE in sequence. 12 steps total, 2s each.
+//
+// Expected output if chain order is correct:
+//   Step  0: P1 top  = RED,   all else dark
+//   Step  1: P1 top  = GREEN, all else dark
+//   Step  2: P1 top  = BLUE,  all else dark
+//   Step  3: P1 bot  = RED,   all else dark
+//   Step  4: P1 bot  = GREEN, all else dark
+//   Step  5: P1 bot  = BLUE,  all else dark
+//   Step  6: P2 top  = RED,   all else dark
+//   Step  7: P2 top  = GREEN, all else dark
+//   Step  8: P2 top  = BLUE,  all else dark
+//   Step  9: P2 bot  = RED,   all else dark
+//   Step 10: P2 bot  = GREEN, all else dark
+//   Step 11: P2 bot  = BLUE,  all else dark
+//
+// Report: for each step, what color lights up and where.
+// ══════════════════════════════════════════════════════════════
+void two_panel_rgb_test(void)
+{
+    ESP_LOGI(TAG, "=== TWO PANEL RGB SEQUENCE TEST ===");
+
+    typedef struct {
+        int      x;           // start column
+        int      y;           // start row
+        int      w;           // width
+        int      h;           // height
+        uint8_t  color;
+        const char *label;
+    } step_t;
+
+    // P1 occupies columns   0–63
+    // P2 occupies columns  64–127
+    // Top half  = rows  0–15  (SCAN_ROWS = 16)
+    // Bottom half = rows 16–31
+    const step_t steps[] = {
+        {  0,  0, 64, SCAN_ROWS, COLOR_RED,    "P1 top  RED"   },
+        {  0,  0, 64, SCAN_ROWS, COLOR_GREEN,  "P1 top  GREEN" },
+        {  0,  0, 64, SCAN_ROWS, COLOR_BLUE,   "P1 top  BLUE"  },
+        {  0, SCAN_ROWS, 64, SCAN_ROWS, COLOR_RED,    "P1 bot  RED"   },
+        {  0, SCAN_ROWS, 64, SCAN_ROWS, COLOR_GREEN,  "P1 bot  GREEN" },
+        {  0, SCAN_ROWS, 64, SCAN_ROWS, COLOR_BLUE,   "P1 bot  BLUE"  },
+        { 64,  0, 64, SCAN_ROWS, COLOR_RED,    "P2 top  RED"   },
+        { 64,  0, 64, SCAN_ROWS, COLOR_GREEN,  "P2 top  GREEN" },
+        { 64,  0, 64, SCAN_ROWS, COLOR_BLUE,   "P2 top  BLUE"  },
+        { 64, SCAN_ROWS, 64, SCAN_ROWS, COLOR_RED,    "P2 bot  RED"   },
+        { 64, SCAN_ROWS, 64, SCAN_ROWS, COLOR_GREEN,  "P2 bot  GREEN" },
+        { 64, SCAN_ROWS, 64, SCAN_ROWS, COLOR_BLUE,   "P2 bot  BLUE"  },
+    };
+
+    int num_steps = sizeof(steps) / sizeof(steps[0]);
+
+    for (int i = 0; i < num_steps; i++) {
+        ESP_LOGI(TAG, "Step %2d: %s", i, steps[i].label);
+        framebuffer_clear_back();
+        framebuffer_fill_rect(steps[i].x, steps[i].y,
+                              steps[i].w, steps[i].h,
+                              steps[i].color);
+        framebuffer_swap();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+
+    ESP_LOGI(TAG, "=== TWO PANEL RGB TEST COMPLETE ===");
+    ESP_LOGI(TAG, "Report: what color and location appeared for each step.");
+}
+
 void run_hardware_check(void)
 {
     ESP_LOGI(TAG, "=== Hardware Check Start (single 64x32 panel) ===");
@@ -347,8 +417,10 @@ void draw_default_content(void)
     //   y=23 : row 3  pixels 23–29 (gap rows 19–22 = 4px breathing room)
     //                               rows 30–31 = 2px bottom margin
     framebuffer_draw_string(1,  1, "HUB75 OK", COLOR_RED);
-    framebuffer_draw_string(1, 12, "STEP  1",  COLOR_GREEN);
-    framebuffer_draw_string(1, 23, "P4 64x32", COLOR_CYAN);
+    framebuffer_draw_string(1, 12, "Panel  1",  COLOR_GREEN);
+    framebuffer_draw_string(1, 23, "P4 128x32", COLOR_CYAN);
+    framebuffer_draw_string(65, 12, "Panel  2",  COLOR_RED);
+    framebuffer_draw_string(65, 23, "P4 128x32", COLOR_CYAN);
 
     framebuffer_swap();
 

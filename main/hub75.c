@@ -51,14 +51,27 @@ static spi_device_handle_t spi_dev;
 //  Must be 4-byte aligned and in DRAM for DMA access
 // ─────────────────────────────────────────────────────────────
 
-// 6 channels × 64 columns = 384 bits = 48 bytes
-// Chain order (SPI sends first byte to END of chain):
-//   bytes  0– 7 = B2  (end of chain)
-//   bytes  8–15 = G2
-//   bytes 16–23 = R2
-//   bytes 24–31 = B1
-//   bytes 32–39 = G1
-//   bytes 40–47 = R1  (start of chain)
+// 2 panels × 6 channels × 64 columns = 768 bits = 96 bytes
+//
+// Chain order — SPI sends first byte to FAR END of chain:
+//
+//   MOSI → [P1:R1]→[P1:G1]→[P1:B1]→[P1:R2]→[P1:G2]→[P1:B2]
+//                                                       ↓ ribbon PO→PI
+//          [P2:R1]←[P2:G1]←[P2:B1]←[P2:R2]←[P2:G2]←[P2:B2]
+//
+// Buffer layout (offset 0 = sent first = P2 far end):
+//   bytes  0– 7  = P2 B2   (sent first → travels to far end)
+//   bytes  8–15  = P2 G2
+//   bytes 16–23  = P2 R2
+//   bytes 24–31  = P2 B1
+//   bytes 32–39  = P2 G1
+//   bytes 40–47  = P2 R1
+//   bytes 48–55  = P1 B2
+//   bytes 56–63  = P1 G2
+//   bytes 64–71  = P1 R2
+//   bytes 72–79  = P1 B1
+//   bytes 80–87  = P1 G1
+//   bytes 88–95  = P1 R1   (sent last → stays at chain start nearest MOSI)
 #define SPI_BUF_BYTES  (PANEL_W * 6 / 8)
 static DRAM_ATTR uint8_t spi_tx_buf[SPI_BUF_BYTES] __attribute__((aligned(4)));
 
@@ -146,37 +159,84 @@ static inline void set_row_address(uint8_t row)
 
 static inline void build_spi_buffer(const uint8_t *fb, uint8_t row)
 {
-    // Each of 6 channels gets its own 8-byte (64-bit) block.
-    // One bit per column: col 0 = byte 0 MSB, col 63 = byte 7 LSB.
-    // Buffer order = chain end first (B2) to chain start last (R1).
-    // PI→PO chain: MOSI → R1 → R2 → G1 → G2 → B1 → B2 (end)
-    // SPI sends first byte to chain END, last byte to chain START.
-    // Buffer order = chain end first → chain start last:
-    uint8_t *b2_plane = spi_tx_buf + 0 * (PANEL_W / 8);   // sent first → chain end
-    uint8_t *b1_plane = spi_tx_buf + 1 * (PANEL_W / 8);
-    uint8_t *g2_plane = spi_tx_buf + 2 * (PANEL_W / 8);
-    uint8_t *g1_plane = spi_tx_buf + 3 * (PANEL_W / 8);
-    uint8_t *r2_plane = spi_tx_buf + 4 * (PANEL_W / 8);
-    uint8_t *r1_plane = spi_tx_buf + 5 * (PANEL_W / 8);   // sent last → chain start (R1)
+    // ── 2-Panel SPI buffer layout ─────────────────────────────
+    //
+    // Actual PI→PO jumper chain order (confirmed from panel photo):
+    //   MOSI → R1 → R2 → G1 → G2 → B1 → B2 → (ribbon) → P2:R1 → ... → P2:B2 → end
+    //
+    //   SPI sends FIRST byte to FAR END of chain (P2:B2).
+    //   SPI sends LAST  byte to chain START      (P1:R1).
+    //
+    //   Buffer order (12 planes × 8 bytes = 96 bytes):
+    //   offset  0: P2:B2  ← sent first, lands at far end
+    //   offset  8: P2:B1
+    //   offset 16: P2:G2
+    //   offset 24: P2:G1
+    //   offset 32: P2:R2
+    //   offset 40: P2:R1
+    //   offset 48: P1:B2
+    //   offset 56: P1:B1
+    //   offset 64: P1:G2
+    //   offset 72: P1:G1
+    //   offset 80: P1:R2
+    //   offset 88: P1:R1  ← sent last, stays at chain start nearest MOSI
+    //
+    // Framebuffer color byte: 0b00000RGB → bit2=R  bit1=G  bit0=B
+    // Panel 1 columns: framebuffer x =  0–63
+    // Panel 2 columns: framebuffer x = 64–127
+
+    const int C = PANEL_COL_W;   // 64 columns per panel
+    const int B = C / 8;         // 8 bytes per plane
+
+    // ── Panel 2 planes (sent first → far end) ─────────────────
+    uint8_t *p2_b2 = spi_tx_buf +  0 * B;
+    uint8_t *p2_b1 = spi_tx_buf +  1 * B;
+    uint8_t *p2_g2 = spi_tx_buf +  2 * B;
+    uint8_t *p2_g1 = spi_tx_buf +  3 * B;
+    uint8_t *p2_r2 = spi_tx_buf +  4 * B;
+    uint8_t *p2_r1 = spi_tx_buf +  5 * B;
+
+    // ── Panel 1 planes (sent last → chain start) ──────────────
+    uint8_t *p1_b2 = spi_tx_buf +  6 * B;
+    uint8_t *p1_b1 = spi_tx_buf +  7 * B;
+    uint8_t *p1_g2 = spi_tx_buf +  8 * B;
+    uint8_t *p1_g1 = spi_tx_buf +  9 * B;
+    uint8_t *p1_r2 = spi_tx_buf + 10 * B;
+    uint8_t *p1_r1 = spi_tx_buf + 11 * B;
 
     memset(spi_tx_buf, 0, SPI_BUF_BYTES);
 
-    const uint8_t *top_row = fb + (row              * PANEL_W);
-    const uint8_t *bot_row = fb + ((row + SCAN_ROWS) * PANEL_W);
+    const uint8_t *top_row = fb + (row               * PANEL_W);
+    const uint8_t *bot_row = fb + ((row + SCAN_ROWS)  * PANEL_W);
 
-    for (int x = 0; x < PANEL_W; x++) {
-        uint8_t top = top_row[x];  // 0b00000RGB — top half
-        uint8_t bot = bot_row[x];  // 0b00000RGB — bottom half
-
+    // ── Panel 1: framebuffer columns 0–63 ─────────────────────
+    for (int x = 0; x < C; x++) {
+        uint8_t top = top_row[x];
+        uint8_t bot = bot_row[x];
         int byte_idx = x / 8;
-        int bit_pos  = 7 - (x % 8);  // MSB first: col 0 → bit 7
+        int bit_pos  = 7 - (x % 8);
 
-        if ((top >> 2) & 1) r1_plane[byte_idx] |= (1 << bit_pos);
-        if ((top >> 1) & 1) g1_plane[byte_idx] |= (1 << bit_pos);
-        if ((top >> 0) & 1) b1_plane[byte_idx] |= (1 << bit_pos);
-        if ((bot >> 2) & 1) r2_plane[byte_idx] |= (1 << bit_pos);
-        if ((bot >> 1) & 1) g2_plane[byte_idx] |= (1 << bit_pos);
-        if ((bot >> 0) & 1) b2_plane[byte_idx] |= (1 << bit_pos);
+        if ((top >> 2) & 1) p1_r1[byte_idx] |= (1 << bit_pos);
+        if ((top >> 1) & 1) p1_g1[byte_idx] |= (1 << bit_pos);
+        if ((top >> 0) & 1) p1_b1[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 2) & 1) p1_r2[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 1) & 1) p1_g2[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 0) & 1) p1_b2[byte_idx] |= (1 << bit_pos);
+    }
+
+    // ── Panel 2: framebuffer columns 64–127 ───────────────────
+    for (int x = 0; x < C; x++) {
+        uint8_t top = top_row[C + x];
+        uint8_t bot = bot_row[C + x];
+        int byte_idx = x / 8;
+        int bit_pos  = 7 - (x % 8);
+
+        if ((top >> 2) & 1) p2_r1[byte_idx] |= (1 << bit_pos);
+        if ((top >> 1) & 1) p2_g1[byte_idx] |= (1 << bit_pos);
+        if ((top >> 0) & 1) p2_b1[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 2) & 1) p2_r2[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 1) & 1) p2_g2[byte_idx] |= (1 << bit_pos);
+        if ((bot >> 0) & 1) p2_b2[byte_idx] |= (1 << bit_pos);
     }
 }
 
@@ -209,7 +269,7 @@ static inline void build_spi_buffer(const uint8_t *fb, uint8_t row)
 //  MOSI and CLK are temporarily configured as plain GPIO for
 //  bit-banging, then SPI takes them over after this function returns.
 //
-//  We shift PANEL_W * 3 bits total (3 chips per row × PANEL_W/16 bits)
+//  We shift PANELS_COUNT * 4 chips × 16 bits = 128 bits total per register write
 //  The standard approach: shift 64 bits per register write,
 //  with LAT raised for the last N clocks of the 64-clock sequence.
 // ─────────────────────────────────────────────────────────────
@@ -251,21 +311,16 @@ static void fm6124_init(void)
 
     // ── WR_REG1: Write brightness register (11 LAT clocks) ────
     //
-    // Sequence: shift 64 bits total.
-    // LAT goes HIGH at clock (64 - 11) = clock 53 (0-indexed).
-    // LAT stays HIGH for the remaining 11 clocks.
-    // Data for REG1: all bits HIGH (0xFFFF pattern) = max brightness.
-    //
-    // The FM6124 has 16-bit registers. We are driving a panel with
-    // multiple chips. Setting MOSI HIGH for all 64 clocks puts 0xFF
-    // into every chip's shift register — safe and correct for REG1.
+    // 2 panels × 4 chips per panel = 8 chips total.
+    // 8 chips × 16 bits = 128 total CLK pulses needed.
+    // LAT goes HIGH at clock (128 - 11) = clock 117 (0-indexed).
+    // Data for REG1: all bits HIGH = max brightness. MOSI stays HIGH throughout.
 
     GPIO_FAST_CLR(HUB75_PIN_LAT);
     FM_MOSI_HIGH();   // REG1 data = all 1s = max brightness
 
-    for (int i = 0; i < 64; i++) {
-        // Raise LAT 11 clocks before the end
-        if (i == (64 - 11)) {
+    for (int i = 0; i < 128; i++) {
+        if (i == (128 - 11)) {
             GPIO_FAST_SET(HUB75_PIN_LAT);
         }
         FM_CLK_PULSE();
@@ -275,36 +330,26 @@ static void fm6124_init(void)
 
     // ── WR_REG2: Write enable register (12 LAT clocks) ────────
     //
-    // Sequence: shift 64 bits total.
-    // LAT goes HIGH at clock (64 - 12) = clock 52 (0-indexed).
-    // LAT stays HIGH for the remaining 12 clocks.
+    // 128 total CLK pulses (8 chips × 16 bits).
+    // LAT goes HIGH at clock (128 - 12) = clock 116 (0-indexed).
     //
-    // REG2 data = 0x0040: bit 6 HIGH = enable output drivers.
-    // Pattern: only bit 6 of the 16-bit register should be 1.
-    //
-    // We shift MSB first. For a 16-bit value 0x0040 = 0000 0000 0100 0000:
-    // bit positions 15..0: only bit 6 is HIGH.
-    // We repeat this 4 times for 64 total clocks (4 chips × 16 bits).
-    //
-    // Bit 6 within each 16-bit group → clock positions 9, 25, 41, 57
-    // (counting from 0, MSB first: clock 0 = bit15, clock 9 = bit6)
+    // REG2 data = 0x0040: only bit 6 HIGH = enable output drivers.
+    // MSB first: bit15=pos0 ... bit6=pos9 within each 16-bit group.
+    // Pattern repeats every 16 clocks across all 8 chips.
 
     GPIO_FAST_CLR(HUB75_PIN_LAT);
 
-    for (int i = 0; i < 64; i++) {
-        // Position within the current 16-bit word (0=MSB, 15=LSB)
-        int bit_pos = i % 16;
+    for (int i = 0; i < 128; i++) {
+        int bit_pos = i % 16;   // position within current 16-bit word
 
-        // Bit 6 of 0x0040: in MSB-first order, bit6 is at position 9
-        // (bit15=pos0, bit14=pos1, ..., bit6=pos9)
+        // bit6 of 0x0040 in MSB-first order = position 9
         if (bit_pos == 9) {
-            FM_MOSI_HIGH();   // this is bit 6 — set HIGH
+            FM_MOSI_HIGH();
         } else {
             FM_MOSI_LOW();
         }
 
-        // Raise LAT 12 clocks before the end
-        if (i == (64 - 12)) {
+        if (i == (128 - 12)) {
             GPIO_FAST_SET(HUB75_PIN_LAT);
         }
         FM_CLK_PULSE();
@@ -416,7 +461,7 @@ void hub75_refresh_task(void *pvParameters)
     // Pre-configure SPI transaction struct — reused every row
     // Filling it once here avoids repeated struct initialization overhead
     spi_transaction_t tx = {
-        .length    = SPI_BUF_BYTES * 8,  // 48 bytes × 8 = 384 bits
+        .length    = SPI_BUF_BYTES * 8,  // 96 bytes × 8 = 768 bits (2 panels)
         .tx_buffer = spi_tx_buf,    // DMA reads from this buffer
         .rx_buffer = NULL,          // No receive
         .flags     = 0,

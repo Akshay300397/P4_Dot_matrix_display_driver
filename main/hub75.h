@@ -3,7 +3,7 @@
 /*
  * hub75.h
  * HUB75 LED Matrix Driver — ESP32-S3 / ESP-IDF v5.x
- * Panel:  2× P4 64×32 ICN6124EJ chained = 128×32
+ * Panel:  1× P4 64×32 FM6124EJ chained = 64×32
  * Scan:   1:16 (ABCD addressing)
  * Author: Generated for ESP32-S3 bare-metal project
  */
@@ -16,10 +16,11 @@
 //  Match these to your physical panel spec
 // ─────────────────────────────────────────────────────────────
 
-#define PANEL_W         64     // Total width  = 2 panels × 64px
+#define PANEL_W         128     // Total width  = 2 panels × 64px
 #define PANEL_H          32     // Total height = 32px
 #define SCAN_ROWS        16     // 1:16 scan → 16 row address lines (ABCD)
-#define PANELS_COUNT      1     // Number of chained panels
+#define PANELS_COUNT      2     // Number of chained panels
+#define PANEL_COL_W      64     // Width of ONE physical panel in columns
 
 // ─────────────────────────────────────────────────────────────
 //  ESP32-S3 PIN ASSIGNMENTS
