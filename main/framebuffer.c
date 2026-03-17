@@ -110,7 +110,10 @@ void framebuffer_clear_back(void)
 void framebuffer_set_pixel(int x, int y, uint8_t color)
 {
     if (x < 0 || x >= PANEL_W || y < 0 || y >= PANEL_H) return;
-    back_buf[y * PANEL_W + x] = color & 0x07;
+    // Formula: fb_x = (x + PANEL_COL_W) % PANEL_W
+    int fb_x = (x + PANEL_COL_W) % PANEL_W;
+    back_buf[y * PANEL_W + fb_x] = color & 0x07;
+    
 }
 
 void framebuffer_fill_rect(int x, int y, int w, int h, uint8_t color)
