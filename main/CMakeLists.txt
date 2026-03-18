@@ -6,10 +6,12 @@ idf_component_register(
         "font.c"
         "display_content1.c"
         "display_content.h"
+        "display_uart.c"
         # font_5x7.c and font_3x5.c are #included by font.c — NOT listed here
         # Adding them here would cause duplicate symbol errors
-        "eth_uart.c"
-    INCLUDE_DIRS
+        #"eth_uart.c"
+        "uart_test1.c"
+    INCLUDE_DIRS 
         "."
     REQUIRES
         driver

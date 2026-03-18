@@ -22,7 +22,8 @@
 #include "hub75.h"                // hub75_init(), hub75_refresh_task(), PANEL_W/H
 #include "framebuffer.h"          // framebuffer_init(), COLOR_* defines
 #include "display_content.h"      // run_hardware_check(), draw_default_content()
-
+#include "uart_test1.c"          // eth_uart_init(), uart_parse_frame()
+#include "display_uart.h"
 /*
  * ═══════════════════════════════════════════════════════════
  * C CONCEPT: static const char *TAG
@@ -170,12 +171,13 @@ void app_main(void)
     draw_default_content();
     ESP_LOGI(TAG, "Step 1 complete — display is live");
 
-    /*
-     * app_main returns here.
-     * FreeRTOS keeps running. Core 1 refresh task loops forever.
-     *
-     * Step 2 will add before this return:
-     *   xTaskCreatePinnedToCore(eth_uart_task, "uart", 4096,
-     *                           NULL, 5, NULL, 0);
-     */
+   eth_uart_init();
+   // Pin UART task to core 0, leaving core 1 free for HUB75
+    xTaskCreatePinnedToCore(uart_parse_frame, "uart_parser",
+                             4096, NULL, 5, NULL, 0);  // ← core 0
+    ESP_LOGI(TAG, "eth_uart_task started");
+    ESP_LOGI(TAG, "System ready — waiting for UART commands");
+
+    // app_main() returns here — FreeRTOS scheduler takes over
+
 }

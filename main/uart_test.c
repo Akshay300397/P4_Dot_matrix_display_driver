@@ -11,6 +11,8 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "freertos/queue.h"
+#include "esp_intr_alloc.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
 
@@ -51,7 +53,7 @@ static const char *TAG1 = "UART TEST";
 #define FRAME_LEN_LEN       1       // LEN field bytes
 #define FRAME_PAYLOAD_LEN   12      // PAYLOAD bytes (4 chars × 3 fields)
 #define FRAME_CRC_LEN       2       // CRC bytes (lo, hi)
-#define FRAME_TOTAL         20      // Total frame bytes
+#define FRAME_TOTAL         19      // Total frame bytes
 
 // C/D mode identifiers
 #define MODE_COMMAND        "C0"
@@ -69,46 +71,11 @@ static const char *TAG1 = "UART TEST";
 #define CMD_QUERY_IP        0x04
 #define CMD_DISPLAY_TEST    0x05
 
+
 typedef struct {
     uint8_t frame[FRAME_TOTAL];
     size_t  len;
 } uart_msg_t;
-
-static QueueHandle_t uart_queue;
-
-static void IRAM_ATTR uart_isr_handler(void *arg)
-{
-    uart_msg_t msg;
-    BaseType_t taskWoken = pdFALSE;
-
-    // Read however many bytes are sitting in the UART RX FIFO right now
-    msg.len = uart_read_bytes(ECHO_UART_PORT_NUM, msg.frame, BUF_SIZE - 1, 0);
-
-    if (msg.len > 0) {
-        msg.frame[msg.len] = '\0'; // null terminate for easy string use later
-
-        // Send the buffer to the queue — wakes up the waiting task
-        // xQueueSendFromISR is the ISR-safe version of xQueueSend
-        xQueueSendFromISR(uart_queue, &msg, &taskWoken);
-    }
-
-    // If sending to queue woke a higher-priority task, switch to it immediately
-    portYIELD_FROM_ISR(taskWoken);
-}
-
-void uart_parse_frame(uint8_t *frame)
-{
-    uart_msg_t msg;
-    
-    //ESP_LOGI(TAG1, "Parser task started, waiting for data..");
-    while(1){
-        if (xQueueReceive(uart_queue, &msg, portMAX_DELAY) == pdTRUE) {
-            ESP_LOGI(TAG1, "Recv str: %s", (char *) msg.frame);
-            //ESP_LOGI(TAG1, "Received %d bytes: %s", msg.len, msg.data);
-        }
-        //parse_frame(msg.frame);
-    }
-}
 
 void eth_uart_init(void)
 {
@@ -120,14 +87,35 @@ void eth_uart_init(void)
         .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
+
     ESP_ERROR_CHECK(uart_param_config(ECHO_UART_PORT_NUM, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(ECHO_UART_PORT_NUM,
                                  ECHO_TEST_TXD, ECHO_TEST_RXD,
                                  ECHO_TEST_RTS, ECHO_TEST_CTS));
+
+    // NULL for event queue — we don't need it
     ESP_ERROR_CHECK(uart_driver_install(ECHO_UART_PORT_NUM,
-                                        BUF_SIZE * 2, 0,
-                                        0, NULL, 0));
-    ESP_LOGI(TAG1, "UART%d ready: RX=GPIO%d TX=GPIO%d @ %d baud",
-             ECHO_UART_PORT_NUM, ECHO_TEST_RXD, ECHO_TEST_TXD, ECHO_UART_BAUD_RATE);
+                                        BUF_SIZE * 2, 0, 0, NULL, 0));
+
+    
+}
+
+void uart_parse_frame(void *arg)
+{
+    //uint8_t frame[FRAME_TOTAL];
+    static uart_msg_t msg;
+    // Configure a temporary buffer for the incoming data
+    uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
+
+    while (1) {
+        // Read data from the UART
+        int len = uart_read_bytes(ECHO_UART_PORT_NUM, msg.frame, FRAME_TOTAL, portMAX_DELAY);
+        // Write data back to the UART
+        //uart_write_bytes(ECHO_UART_PORT_NUM, (const char *) data, len);
+        if (len) {
+            data[len] = '\0';
+            ESP_LOGI(TAG1, "Recv %d str: %s", len, msg.frame);
+        }
+    }
 }
 
