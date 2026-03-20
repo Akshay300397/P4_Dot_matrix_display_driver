@@ -10,7 +10,7 @@ idf_component_register(
         # font_5x7.c and font_3x5.c are #included by font.c — NOT listed here
         # Adding them here would cause duplicate symbol errors
         #"eth_uart.c"
-        "uart_test1.c"
+        "uart_test2.c"
     INCLUDE_DIRS 
         "."
     REQUIRES

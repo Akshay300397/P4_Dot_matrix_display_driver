@@ -22,21 +22,104 @@
 #include "hub75.h"                // hub75_init(), hub75_refresh_task(), PANEL_W/H
 #include "framebuffer.h"          // framebuffer_init(), COLOR_* defines
 #include "display_content.h"      // run_hardware_check(), draw_default_content()
-#include "uart_test1.c"          // eth_uart_init(), uart_parse_frame()
+#include "uart_test2.c"          // eth_uart_init(), uart_parse_frame()
 #include "display_uart.h"
-/*
- * ═══════════════════════════════════════════════════════════
- * C CONCEPT: static const char *TAG
- * ═══════════════════════════════════════════════════════════
- * Every .c file in the project has its own TAG.
- * Log output looks like:  I (1234) MAIN: message
- *                                   ^^^^
- *                                   TAG value
- *
- * static → visible only in this .c file (prevents name clash)
- * const  → the string content is read-only
- */
+
+#define WIZ_STATUS_PIN      GPIO_NUM_7      // WIZ550S2E STATUS2 pin
+                                            // LOW  = TCP connected
+                                            // HIGH = TCP disconnected
+ 
+#define FAULT_LED_PIN       GPIO_NUM_15     // Fault indicator LED
+                                            // HIGH = fault (disconnected)
+
 static const char *TAG = "MAIN";
+static const char *TAG2 = "Connection_Status";
+
+// ─────────────────────────────────────────────────────────────
+//  STATUS GPIO INIT
+//  WIZ_STATUS_PIN : input, pull-up (active LOW — WIZ drives it LOW
+//                   when connected, floats/HIGH when disconnected)
+//  FAULT_LED_PIN  : output (HIGH = LED on = fault)
+// ─────────────────────────────────────────────────────────────
+ 
+void wiz_status_gpio_init(void)
+{
+    gpio_config_t status_cfg = {
+        .pin_bit_mask = (1ULL << WIZ_STATUS_PIN),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,     // HIGH when WIZ unpowered
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&status_cfg));
+ 
+    gpio_config_t led_cfg = {
+        .pin_bit_mask = (1ULL << FAULT_LED_PIN),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&led_cfg));
+    gpio_set_level(FAULT_LED_PIN, 0);   // LED off at startup
+ 
+    ESP_LOGI(TAG2, "GPIO ready: STATUS2=GPIO%d FAULT_LED=GPIO%d",
+             WIZ_STATUS_PIN, FAULT_LED_PIN);
+}
+ 
+// ─────────────────────────────────────────────────────────────
+//  WIZ CONNECTION STATUS TASK
+//
+//  Polls WIZ_STATUS_PIN every 500ms.
+//  Only acts on state CHANGE to avoid redrawing every poll.
+//
+//  Connected   (LOW)  → LED off, clear "NO NET", wait for fresh data
+//  Disconnected (HIGH) → LED on, show "NO NET" on display
+// ─────────────────────────────────────────────────────────────
+ 
+void wiz_status_task(void *pvParameters)
+{
+    ESP_LOGI(TAG2, "Status monitor started on core %d", xPortGetCoreID());
+ 
+    // Read initial state so we don't trigger a false change at boot
+    bool prev_connected = (gpio_get_level(WIZ_STATUS_PIN) == 0);
+ 
+    // Apply initial state at startup
+    if (!prev_connected) {
+        gpio_set_level(FAULT_LED_PIN, 1);
+        //framebuffer_clear_back();
+        //framebuffer_draw_string(20,  6, "NO NET", COLOR_RED);
+        //framebuffer_draw_string(16, 19, "CHECK",  COLOR_YELLOW);
+        //framebuffer_swap();
+        ESP_LOGW(TAG2, "Boot state: DISCONNECTED");
+        uart_send("CHECK_CONNECTION..\r\n");
+    } else {
+        gpio_set_level(FAULT_LED_PIN, 0);
+        ESP_LOGI(TAG2, "Boot state: CONNECTED");
+    }
+ 
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+ 
+        bool connected = (gpio_get_level(WIZ_STATUS_PIN) == 0);
+ 
+        if (connected == prev_connected) continue;  // no change — skip
+ 
+        if (connected) {
+            // ── Reconnected ───────────────────────────────────
+            ESP_LOGI(TAG2, "WIZ550S2E: TCP CONNECTED");
+            gpio_set_level(FAULT_LED_PIN, 0);       // LED off
+            
+        } else {
+            // ── Disconnected ──────────────────────────────────
+            ESP_LOGW(TAG2, "WIZ550S2E: TCP DISCONNECTED");
+            gpio_set_level(FAULT_LED_PIN, 1);       // LED on
+            uart_send("CHECK_CONNECTION..\r\n");
+        }
+ 
+        prev_connected = connected;
+    }
+}
 
 /*
  * ═══════════════════════════════════════════════════════════
@@ -47,12 +130,7 @@ static const char *TAG = "MAIN";
  */
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=========================================");
-    ESP_LOGI(TAG, " HUB75 STEP 1  — Single Panel 64x32");
-    ESP_LOGI(TAG, " Panel : P4 64x32 ICN6124EJ");
-    ESP_LOGI(TAG, " Scan  : 1:16 ABCD binary");
-    ESP_LOGI(TAG, " No UART yet — display only");
-    ESP_LOGI(TAG, "=========================================");
+    ESP_LOGI(TAG, "System booted, app_main running on core %d", xPortGetCoreID());
 
     /* ── A: Initialize framebuffer ──────────────────────────────
      * Must be called first — zeroes buf_A and buf_B,
@@ -69,61 +147,8 @@ void app_main(void)
     hub75_init();
     ESP_LOGI(TAG, "HUB75 hardware ready");
 
-    /* ── C: Start display refresh task on Core 1 ────────────────
-     *
-     * ═══════════════════════════════════════════════════════════
-     * C CONCEPT: FUNCTION POINTER
-     * ═══════════════════════════════════════════════════════════
-     * A function pointer is a variable that stores the MEMORY
-     * ADDRESS of a function — just like a data pointer stores
-     * the address of a variable.
-     *
-     *   int x = 5;
-     *   int *p = &x;      // p = address of x
-     *   *p = 10;          // use via dereference
-     *
-     *   void foo(void) { }
-     *   void (*fp)(void) = foo;  // fp = address of foo
-     *   fp();                    // call via pointer
-     *
-     * FreeRTOS TaskFunction_t is defined as:
-     *   typedef void (*TaskFunction_t)(void *);
-     *   — "pointer to function taking void*, returning void"
-     *
-     * hub75_refresh_task   → its ADDRESS  (no call, just a pointer)
-     * hub75_refresh_task() → CALLS it now (wrong — we want later)
-     *
-     * ═══════════════════════════════════════════════════════════
-     * C CONCEPT: CALLBACK
-     * ═══════════════════════════════════════════════════════════
-     * A callback = function YOU write, but SOMEONE ELSE calls.
-     *
-     * Registration here:
-     *   xTaskCreatePinnedToCore(hub75_refresh_task, ...)
-     *   → you give FreeRTOS the function address
-     *   → FreeRTOS calls it later on Core 1 via stored pointer
-     *   → your code never calls hub75_refresh_task() directly
-     *
-     * Same pattern used everywhere in embedded C:
-     *   gpio_isr_register(my_handler, ...)      GPIO interrupt
-     *   esp_timer_create(&cfg)   cfg.callback=fn Timer callback
-     *   spi dev_cfg.pre_cb = fn                 SPI transaction
-     *
-     * ═══════════════════════════════════════════════════════════
-     * DIRECT CALL vs CALLBACK — KEY DIFFERENCE
-     * ═══════════════════════════════════════════════════════════
-     *
-     * Direct call (used for run_hardware_check below):
-     *   run_hardware_check();
-     *   → CPU jumps to function RIGHT NOW
-     *   → this line blocks until the function returns
-     *
-     * Callback registration (used here):
-     *   xTaskCreatePinnedToCore(hub75_refresh_task, ...)
-     *   → CPU does NOT jump to hub75_refresh_task now
-     *   → FreeRTOS stores the address
-     *   → this line returns immediately
-     *   → FreeRTOS calls hub75_refresh_task later on Core 1
+    /* ── C: Start HUB75 refresh task on Core 1 ─────────────────
+     * This continuously reads display_buf and sends rows to the panel.
      */
     xTaskCreatePinnedToCore(
         hub75_refresh_task,        // FUNCTION POINTER — address of task
@@ -172,9 +197,15 @@ void app_main(void)
     ESP_LOGI(TAG, "Step 1 complete — display is live");
 
    eth_uart_init();
-   // Pin UART task to core 0, leaving core 1 free for HUB75
-    xTaskCreatePinnedToCore(uart_parse_frame, "uart_parser",
-                             4096, NULL, 5, NULL, 0);  // ← core 0
+
+    // uart_parse_frame — highest, must never be starved
+xTaskCreatePinnedToCore(uart_parse_frame, "uart",    4096, NULL,
+                        configMAX_PRIORITIES - 1, NULL, 0);
+
+// wiz_status_task — lower, preemptible, only polls GPIO
+xTaskCreatePinnedToCore(wiz_status_task,  "wiz_mon", 2048, NULL,
+                        configMAX_PRIORITIES - 2, NULL, 0);
+
     ESP_LOGI(TAG, "eth_uart_task started");
     ESP_LOGI(TAG, "System ready — waiting for UART commands");
 
