@@ -1,21 +1,62 @@
-# HUB75 LED Matrix Driver — ESP32-S3 / ESP-IDF
+# HUB75 LED Matrix Driver — ESP32-S3 / ESP-IDF v5.x
 
-Bare-metal HUB75 driver for **2× P4 64×32 ICN6124EJ** panels chained to **128×32** total display.  
-Built with ESP32-S3 and ESP-IDF v5.x. Receives display commands via UART from an ethernet-to-serial board.
+Bare-metal HUB75 driver for **2× P4 64×32 FM6124EJ** panels chained to a **128×32** total display.  
+Built with ESP32-S3 and ESP-IDF v5.x. Receives display commands over UART from an Ethernet-to-serial board.
+
+---
+
+## Features
+
+- **Dual-panel 128×32** display via single SPI chain
+- **FM6124EJ** driver IC initialization (REG1 brightness + REG2 enable — required at boot)
+- **Double-buffered framebuffer** — flicker-free updates with atomic buffer swap
+- **1:16 scan rate** with ABCD binary row addressing
+- **5×7 bitmap font** with full ASCII support (32–126)
+- **UART command protocol** — 11-byte fixed frames, 6 data fields, per-field scrolling
+- **FreeRTOS dual-core** — refresh task pinned to Core 1, app logic on Core 0
+- **Diagnostic test modes** — color bars, row scan, corner pixels, chain order test
 
 ---
 
 ## Hardware
 
-| Component | Specification |
-|---|---|
-| MCU | ESP32-S3 |
-| Panel | P4 64×32 2121 16S JHT2.0 |
-| Driver IC | ICN6124EJ |
-| Connector | HUB75 |
-| Configuration | 2 panels chained = 128×32 total |
-| Display size | 512mm × 128mm |
-| Scan rate | 1:16 (ABCD binary addressing) |
+| Component       | Specification                          |
+|-----------------|----------------------------------------|
+| MCU             | ESP32-S3                               |
+| Panel           | P4 64×32 2121 16S (×2)                 |
+| Driver IC       | FM6124EJ                               |
+| Connector       | HUB75                                  |
+| Configuration   | 2 panels chained → 128×32 total        |
+| Display size    | 512 mm × 128 mm                        |
+| Scan rate       | 1:16 (ABCD binary addressing)          |
+| Power           | 5V external PSU, minimum 8A            |
+
+---
+
+## Panel Chaining
+
+The two panels are chained via a **single bridge wire** — not the ribbon cable.
+
+```
+ESP32-S3 MOSI ──► Panel 1 (P1) PI:R1
+                  P1 internal chain: R1 → R2 → G1 → G2 → B1 → B2
+                  P1 PO:B2 ──► P2 PI:R1  ← bridge wire
+                  P2 internal chain: R1 → R2 → G1 → G2 → B1 → B2
+```
+
+**Physical layout:** P2 on the left, P1 on the right.
+
+### PI→PO Jumpers (required on EACH panel)
+
+These connect the 6 internal shift registers into one serial chain:
+
+| PI Pin | → PO Pin |
+|--------|----------|
+| R2     | ← R1     |
+| G1     | ← R2     |
+| G2     | ← G1     |
+| B1     | ← G2     |
+| B2     | ← B1     |
 
 ---
 
@@ -23,48 +64,53 @@ Built with ESP32-S3 and ESP-IDF v5.x. Receives display commands via UART from an
 
 ### ESP32-S3 → Panel 1 HUB75 (PI connector)
 
-| Signal | ESP32-S3 GPIO | HUB75 Pin | Notes |
-|---|---|---|---|
-| MOSI | 11 | R1 | SPI2 data — after PI→PO jumpers |
-| CLK | 12 | CLK | SPI2 clock |
-| LAT | 13 | LAT | Latch |
-| OE | 14 | OE | Output Enable |
-| A | 1 | A | Row address bit 0 |
-| B | 2 | B | Row address bit 1 |
-| C | 4 | C | Row address bit 2 |
-| D | 5 | D | Row address bit 3 |
-| GND | GND | GND | Common ground |
-
-### Panel Chaining
-```
-ESP32-S3 → Panel 1 PI → [Panel 1 PO → Panel 2 PI] → Panel 2 PO (unused)
-```
-Connect Panel 1's HUB75 output (PO) to Panel 2's HUB75 input (PI) via ribbon cable.
-
-### PI→PO Jumpers (on EACH panel — required)
-These jumpers chain the 6 internal shift registers into one serial chain,
-allowing a single MOSI line to drive all color channels.
-
-| PI Pin | → | PO Pin |
-|---|---|---|
-| R2 | ← | R1 |
-| G1 | ← | R2 |
-| G2 | ← | G1 |
-| B1 | ← | G2 |
-| B2 | ← | B1 |
+| Signal | GPIO | HUB75 Pin | Notes                     |
+|--------|------|-----------|---------------------------|
+| MOSI   | 11   | R1        | SPI2 data                 |
+| CLK    | 12   | CLK       | SPI2 clock                |
+| LAT    | 13   | LAT       | Latch                     |
+| OE     | 14   | OE        | Output Enable (active LOW) |
+| A      | 1    | A         | Row address bit 0          |
+| B      | 2    | B         | Row address bit 1          |
+| C      | 3    | C         | Row address bit 2          |
+| D      | 4    | D         | Row address bit 3          |
+| GND    | GND  | GND       | Common ground              |
 
 ### UART (Ethernet-to-Serial Board)
-| Signal | ESP32-S3 GPIO | Connect to |
-|---|---|---|
-| RX | 16 | Ethernet board TX |
-| TX | 17 | Ethernet board RX |
-| GND | GND | Ethernet board GND |
+
+| Signal | GPIO | Direction       |
+|--------|------|-----------------|
+| RX     | 16   | ESP32 receives  |
+| TX     | 17   | ESP32 transmits |
+| GND    | GND  | Common ground   |
 
 ### Power
-- Panel 1 and Panel 2: Each connected to **5V external PSU** independently
-- Minimum PSU rating: **5V 8A** (both panels at full brightness)
-- ESP32-S3: Powered separately (3.3V or via USB)
+
+- Each panel independently connected to **5V external PSU**
+- Minimum rating: **5V 8A** (both panels at full brightness)
+- ESP32-S3: powered separately (USB or 3.3V)
 - **Common GND** between ESP32-S3, both panels, and PSU
+
+---
+
+## SPI Buffer Layout
+
+The SPI buffer is **96 bytes** (12 planes × 8 bytes). Because SPI shifts MSB-first and the chain fills in reverse, **P2 occupies bytes 0–47 (first in buffer)** and **P1 occupies bytes 48–95 (last in buffer)**. Within each panel, planes are also reversed:
+
+```
+Offset 0–7   : P2 B2  ← sent first → arrives at chain end
+Offset 8–15  : P2 B1
+Offset 16–23 : P2 G2
+Offset 24–31 : P2 G1
+Offset 32–39 : P2 R2
+Offset 40–47 : P2 R1
+Offset 48–55 : P1 B2
+Offset 56–63 : P1 B1
+Offset 64–71 : P1 G2
+Offset 72–79 : P1 G1
+Offset 80–87 : P1 R2
+Offset 88–95 : P1 R1  ← sent last → stays at chain start
+```
 
 ---
 
@@ -72,14 +118,16 @@ allowing a single MOSI line to drive all color channels.
 
 ```
 hub75_display/
-├── CMakeLists.txt          ← Top-level, sets IDF_TARGET=esp32s3
-├── sdkconfig.defaults      ← Recommended build settings
+├── CMakeLists.txt          ← Top-level build config
 └── main/
     ├── CMakeLists.txt      ← Component registration
-    ├── main.c              ← app_main(), startup pattern, task creation
-    ├── hub75.h / hub75.c   ← HUB75 SPI driver, refresh task (Core 1)
-    ├── framebuffer.h / .c  ← Double buffer, drawing primitives, 5×7 font
-    └── eth_uart.h / .c     ← UART receiver, packet parser (Core 0)
+    ├── main_1.c            ← app_main(), startup sequence, task creation
+    ├── hub75.h / hub75.c   ← HUB75 SPI driver, FM6124 init, refresh task (Core 1)
+    ├── framebuffer.h / .c  ← Double-buffered framebuffer, drawing primitives
+    ├── font.h / font.c     ← Font selector and interface
+    ├── font_5x7.c          ← 5×7 bitmap font, ASCII 32–126
+    ├── display_content.h/c ← Boot patterns, default content, diagnostic tests
+    └── uart_test2.c        ← UART receiver and packet parser (Core 0)
 ```
 
 ---
@@ -93,78 +141,120 @@ hub75_display/
 # 2. Set target
 idf.py set-target esp32s3
 
-# 3. Configure (optional — sdkconfig.defaults covers most settings)
-idf.py menuconfig
-
-# 4. Build
+# 3. Build
 idf.py build
 
-# 5. Flash and monitor
+# 4. Flash and monitor
 idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+---
+
+## Boot Sequence
+
+```
+app_main()
+  ├─ framebuffer_init()          — zero both buffers, create swap mutex
+  ├─ hub75_init()                — FM6124 register init, then SPI2 + GPIO
+  ├─ xTaskCreatePinnedToCore()   — start hub75_refresh_task on Core 1
+  ├─ run_hardware_check()        — 5 test patterns × ~1s each (~6s total)
+  └─ draw_default_content()      — static screen, stays until UART updates it
 ```
 
 ---
 
 ## UART Packet Protocol
 
-All commands follow this frame format:
+Fixed **11-byte** frames:
 
 ```
-┌────────┬────────┬────────┬──────────────────┬────────┐
-│  0xAA  │  CMD   │  LEN   │    PAYLOAD       │  CRC   │
-│ 1 byte │ 1 byte │ 1 byte │   LEN bytes      │ 1 byte │
-└────────┴────────┴────────┴──────────────────┴────────┘
-CRC = XOR of CMD + LEN + all PAYLOAD bytes
+┌──────┬────────┬─────┬─────────────┬─────┬──────┐
+│  *   │  CMD   │ LEN │   PAYLOAD   │ CRC │  #   │
+│  1B  │  2B    │  1B │     4B      │  1B │  1B  │
+└──────┴────────┴─────┴─────────────┴─────┴──────┘
+
+Total: 1 + 2 + 1 + 4 + 1 + 1 = 11 bytes
+CRC = simple byte sum of frame[1..8]
 ```
 
-### Commands
+### Command Types
 
-| CMD | Name | Payload | Description |
-|---|---|---|---|
-| 0x01 | CMD_CLEAR | none | Clear display to black |
-| 0x02 | CMD_PIXEL | x(1) y(1) r(1) g(1) b(1) | Set single pixel |
-| 0x03 | CMD_TEXT | x(1) y(1) r(1) g(1) b(1) str+\0 | Draw text string |
-| 0x04 | CMD_FILL_RECT | x(1) y(1) w(1) h(1) r(1) g(1) b(1) | Fill rectangle |
-| 0x06 | CMD_FULLFRAME | chunk(1) + 64 bytes | Send full frame in 64 chunks |
+| CMD | Description                   |
+|-----|-------------------------------|
+| C0  | Control command               |
+| D1–D6 | Data fields (6 total)       |
 
-### Example: Display "HELLO" in red at position (2, 12)
-```
-AA 03 0A 02 0C FF 00 00 48 45 4C 4C 4F 00 CRC
-│  │  │  │  │  │  │  │  └──────────────── "HELLO\0"
-│  │  │  │  │  └──┴──┴─────────────────── R=255, G=0, B=0
-│  │  │  └──┴────────────────────────────  x=2, y=12 (position)
-│  │  └───────────────────────────────── LEN=10
-│  └────────────────────────────────────  CMD=TEXT
-└───────────────────────────────────────  Start byte
-```
+### Display Layout
 
----
-
-## Troubleshooting
-
-| Symptom | Likely Cause | Fix |
-|---|---|---|
-| No display at all | Power or OE pin issue | Check 5V PSU, verify OE=GPIO14 |
-| Only one panel works | Panel chaining ribbon | Check PO→PI ribbon connection |
-| Colors wrong/swapped | Bit packing order | Swap bit assignments in `build_spi_buffer()` |
-| Image horizontally mirrored | SPI send direction | Reverse loop in `build_spi_buffer()` |
-| Ghost rows / smearing | Mux delay too short | Increase `HUB75_MUX_DELAY_US` in hub75.h |
-| Noise / random pixels | SPI speed too high | Reduce `HUB75_SPI_SPEED_HZ` to 10MHz |
-| Rows scrambled | Wrong scan pattern | ICN6124 is standard BINARY — should work |
-| Display flickering | Watchdog reset on Core 1 | Confirm `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n` |
-| UART data loss | Baud rate mismatch | Verify both sides at 115200 |
+| Parameter       | Value  |
+|-----------------|--------|
+| Fields          | 6 (D1–D6) |
+| Rows            | 2 (3 fields each) |
+| X offset        | 26 px  |
+| Field spacing   | 34 px  |
+| Row 1 Y         | 6      |
+| Row 2 Y         | 19     |
+| Max chars/field | 4      |
+| Font            | 5×7    |
 
 ---
 
 ## Color Reference (3-bit)
 
-| Color | Value | Binary |
-|---|---|---|
-| BLACK | 0x00 | 000 |
-| RED | 0x04 | 100 |
-| GREEN | 0x02 | 010 |
-| BLUE | 0x01 | 001 |
-| YELLOW | 0x06 | 110 |
-| CYAN | 0x03 | 011 |
-| MAGENTA | 0x05 | 101 |
-| WHITE | 0x07 | 111 |
+| Color   | Value  | Binary |
+|---------|--------|--------|
+| BLACK   | 0x00   | 000    |
+| RED     | 0x04   | 100    |
+| GREEN   | 0x02   | 010    |
+| BLUE    | 0x01   | 001    |
+| YELLOW  | 0x06   | 110    |
+| CYAN    | 0x03   | 011    |
+| MAGENTA | 0x05   | 101    |
+| WHITE   | 0x07   | 111    |
+
+---
+
+## Diagnostic Functions
+
+Call these from `app_main()` instead of `run_hardware_check()` during debugging:
+
+| Function           | What it does                                           |
+|--------------------|--------------------------------------------------------|
+| `run_hardware_check()` | 5 patterns: color bars, bands, all colors, corners, text |
+| `chain_order_test()` | Steps through R/G/B on top/bottom halves to verify chain order |
+| `row_scan_test()`  | Lights one framebuffer row at a time to verify ABCD addressing |
+
+---
+
+## Troubleshooting
+
+| Symptom                  | Likely Cause                   | Fix                                      |
+|--------------------------|--------------------------------|------------------------------------------|
+| No display at all        | Power or OE issue              | Check 5V PSU, verify OE=GPIO14           |
+| Only one panel lights    | Bridge wire missing            | Check P1:PO:B2 → P2:PI:R1 wire          |
+| Random dots at boot      | FM6124 not initialized         | Verify `fm6124_init()` runs before SPI   |
+| Colors wrong/swapped     | Bit plane order mismatch       | Run `chain_order_test()` and compare     |
+| Image mirrored           | SPI bit/byte send direction    | Check `bit_pos = 7 - (x % 8)` in buffer |
+| Ghost rows / smearing    | Mux delay too short            | Increase `HUB75_MUX_DELAY_US`           |
+| Noise / random pixels    | SPI speed too high             | Reduce `HUB75_SPI_SPEED_HZ` to 10MHz    |
+| Display flickering       | Watchdog reset on Core 1       | Set `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n` |
+| UART data loss           | Baud rate mismatch             | Verify both sides at 115200              |
+| P2 shows P1 content      | Buffer panel order wrong       | P2 bytes must come first in SPI buffer   |
+
+---
+
+## Key Design Notes
+
+1. **HUB75 ribbon carries parallel data, not serial chain.** The ribbon's 6 data lines feed both panels simultaneously. True chaining requires a physical bridge wire (P1 PO → P2 PI), not the ribbon.
+
+2. **SPI buffer ordering is counter-intuitive.** SPI shifts MSB-first and the shift register fills in reverse. The last physical panel (P2, left) must be placed first in the buffer. Within each panel, planes are also reversed (B2 first, R1 last).
+
+3. **FM6124 requires explicit initialization.** Without writing REG1 (brightness) and REG2 (enable output), the panel shows garbage or nothing at all. This must happen before SPI is initialized.
+
+4. **3 CLK pulses while LAT is HIGH = DATA_LATCH on FM6124.** More or fewer pulses trigger different internal commands (11 = write brightness register, 12 = write enable register). This is critical to get right in the refresh loop.
+
+---
+
+## License
+
+MIT
